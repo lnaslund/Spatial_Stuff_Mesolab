@@ -1,0 +1,104 @@
+---
+title: "Spatial Stuff Lab Meeting"
+author: "L. Naslund"
+date: "2/14/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# uncomment and install packages you do not already have installed 
+
+# install.packages("sf")
+# install.packages("tidyverse")
+# install.packages("mapview")
+# install.packages("nhdplusTools")
+
+# install the developer version of whitebox
+# if (!require("remotes")) install.packages('remotes')
+# remotes::install_github("giswqs/whiteboxR", build = FALSE)
+
+library(tidyverse)  # data visualization and manipulation tools
+library(sf) # the main package to deal with vector data
+library(mapview) # quick viewing of spatial data
+library(leaflet) # develop pretty, interactive maps 
+library(whitebox)
+library(nhdplusTools)
+library(elevatr) # package to access elevation data
+library(raster) # package to deal with rasters 
+```
+
+```{r, import points}
+# import and plot GPS points from file
+sites <- read.csv("../1-data/coweeta_points.csv") 
+sites
+class(sites)
+
+# EPSG codes are a fast way of retrieving coordinate reference system 
+sites <- sites %>% 
+  st_as_sf(coords=c("Long", "Lat"), crs=4326) # CRS 4326 is WGS 84 
+sites
+class(sites) # notice addition of sf data type
+  
+mapview(sites)
+
+# from tibble
+sites_trib <- tibble(Site = c("Confl", "WS14", "WS27", "WS34", "WS7"), Lat = c(35.05975, 35.05406, 35.03798, 35.06088, 35.06414), Long = c(-83.42846, -83.43160, -83.45887, -83.45475, -83.44039)) %>% st_as_sf(coords=c("Long", "Lat"), crs=4326)
+
+mapview(sites_trib)
+```
+
+```{r, import shapefile}
+coweeta_ws <- read_sf("../1-data/coweeta_ws.shp") 
+
+mapview(coweeta_ws, alpha.regions=0)+
+  mapview(sites)
+```
+
+```{r, nhdplus tools to download flowlines}
+# You can use nhdplus tools to download HR data too but tools are better developed for V2
+
+# Extract the ComID of the outlet flowline segment
+# ComID is an identifier of an NHD flowlines
+start_comid <- discover_nhdplus_id(sites %>% filter(Site == "Confl"))
+
+# Extract upstream flowline segments
+flowline <- navigate_nldi(list(featureSource = "comid",
+                               featureID = start_comid),
+                          mode = "upstreamTributaries",
+                          distance_km = 1000)
+
+# Download flowline, catchment, and waterbody layers 
+subset_file <- tempfile(fileext = ".gpkg")
+subset <- subset_nhdplus(comids = as.integer(flowline$UT$nhdplus_comid),
+                         output_file = subset_file,
+                         nhdplus_data = "download",
+                         flowline_only = FALSE,
+                         return_data = TRUE, overwrite = TRUE)
+
+# No waterbodies in this upstream trace
+flowline <- subset$NHDFlowline_Network # notice the attributes that are downloaded (e.g., stream order, QAMA) 
+catchment <- subset$CatchmentSP
+
+mapview(flowline)
+```
+
+```{r, watershed delineation}
+# transform points to USA Albers Equal Area Conic
+sites <- sites %>% st_transform(crs=5070)
+
+# NOTE: NHDPlus HR comes with flow accumulation and flow direction rasters. I would highly recommend starting with these rasters if you are working with US data but am showing how to generate these rasters if you aren't working with US data. 
+
+# Z sets resolution with 14 representing highest resolution
+# expand argument extends the bounding box used to extract elevation data
+coweeta_dem <- elevatr::get_elev_raster(sites, z=14, expand = 100)
+
+# check that all the sites were captured
+# if you are extract elevation from a large area, you will want to generate a bounding box (st_bbox(coweeta_dem)) and plot that because it will take forever for the raster to plot.
+plot(coweeta_dem)
+plot(sites, col="black", lwd=2, add=T)
+
+# save dem raster
+
+
+```
+
