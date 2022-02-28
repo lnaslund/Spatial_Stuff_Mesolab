@@ -12,22 +12,48 @@ output: html_document
 # install.packages("tidyverse")
 # install.packages("mapview")
 # install.packages("nhdplusTools")
+# install.packages("elevatr")
+# install.packages("stars")
+# install.packages("raster")
 
-# install the developer version of whitebox
-# if (!require("remotes")) install.packages('remotes')
-# remotes::install_github("giswqs/whiteboxR", build = FALSE)
+#whitebox::install_whitebox()
 
 library(tidyverse)  # data visualization and manipulation tools
 library(sf) # the main package to deal with vector data
 library(mapview) # quick viewing of spatial data
 library(leaflet) # develop pretty, interactive maps 
-library(whitebox)
-library(nhdplusTools)
+library(whitebox) # hydrology toolbox
+library(nhdplusTools) # download NHDPlus data from R
 library(elevatr) # package to access elevation data
-library(raster) # package to deal with rasters 
+library(stars) # package for raster and vector data cubes in S3
+library(raster) # package for rasters in S4
 ```
 
-```{r, import points}
+```{r, approaches to vector data}
+# There are two primary approaches to handling vector data in R. One represented by the package sp and one represented by the package sf. These two packages use different object oriented systems in R which means they (and the packages that are dependent on each) don't play well together. (If you want to learn more about OO systems in R, read this chapter in Hadley Wickham's Advanced R book http://adv-r.had.co.nz/OO-essentials.html)
+# sp predates sf and many of the spatial analysis packages you may find were built with sp objects. 
+# Several of the packages that are used with sp classes--rgdal, rgeos, and maptools--will be retired by the end of 2023 so you may find that the other packages you use for spatial analysis are/will be changing.
+# The code below is to generally illustrate the difference between classes in sp and sf. You do not need to uncomment this and run it. This is getting into the weeds a bit but I find it helpful to know that these two ways of handling spatial data exist.
+
+# library(sp)
+# library(pryr)
+# 
+# random_mat <- matrix(runif(2), ncol=2)
+# 
+# pts_sp <- sp::SpatialPoints(random_mat, proj4string = CRS("+init=epsg:5070"))
+# 
+# str(pts_sp) # stores information as lists
+# pryr::otype(pts_sp) # S4
+# 
+# library(sf)
+# 
+# pts_sf <- sf::st_as_sf(as.data.frame(random_mat), coords=c(1,2), crs=5070)
+# 
+# str(pts_sf)# dataframe w/ spatial info stored in column
+# pryr::otype(pts_sf) # S3
+```
+
+```{r, import GPS coordinates convert to vector data}
 # import and plot GPS points from file
 sites <- read.csv("../1-data/coweeta_points.csv") 
 sites
@@ -41,18 +67,176 @@ class(sites) # notice addition of sf data type
   
 mapview(sites)
 
-# from tibble
-sites_trib <- tibble(Site = c("Confl", "WS14", "WS27", "WS34", "WS7"), Lat = c(35.05975, 35.05406, 35.03798, 35.06088, 35.06414), Long = c(-83.42846, -83.43160, -83.45887, -83.45475, -83.44039)) %>% st_as_sf(coords=c("Long", "Lat"), crs=4326)
+# from dataframe created within R
+sites_trib <-
+  data.frame(
+    Site = c("Confl", "WS14", "WS27", "WS34", "WS7"),
+    Lat = c(35.05975, 35.05406, 35.03798, 35.06088, 35.06414),
+    Long = c(-83.42846,-83.43160,-83.45887,-83.45475,-83.44039)
+  ) %>% st_as_sf(coords = c("Long", "Lat"), crs = 4326)
 
 mapview(sites_trib)
+
+# transform points to USA Albers Equal Area Conic
+sites <- sites %>% st_transform(crs=5070)
 ```
 
-```{r, import shapefile}
-coweeta_ws <- read_sf("../1-data/coweeta_ws.shp") 
+```{r, import vector data}
+coweeta_ws <- read_sf("../1-data/coweeta_ws.shp") %>% st_transform(5070) # transform to Albers Equal Area using epsg code
 
 mapview(coweeta_ws, alpha.regions=0)+
   mapview(sites)
 ```
+
+```{r, spatial data manipulation}
+# sf is the workhorse of spatial data manipulation in R
+# This cheat sheet provides a good overview of what is possible in sf https://github.com/rstudio/cheatsheets/blob/main/sf.pdf 
+
+# geometric confirmation
+# are all sites within the delineated watershed?
+st_contains(coweeta_ws, sites, sparse=F)
+
+# which sites are within 1km from the confluence
+st_is_within_distance(sites, sites[1,], 1000,  sparse=F)
+
+# geometry operations
+# create buffer around points
+buffs <- st_buffer(sites, 1000)
+
+mapview(buffs)+
+  mapview(sites)
+
+# create a polygon that is the intersection of polygons
+buffs_inter <- st_intersection(buffs[1,], buffs[2,])
+
+mapview(buffs)+
+  mapview(buffs_inter)
+```
+
+
+```{r, crop raster and summarize}
+# There are three main raster packages you may come across and my impression is that there isn't a settled favorite yet. Here I am focusing on the stars packages because it implements rasters as S3 objects and so has better integration with sf but there is much about stars I find confusing. You are very likely to also come across terra and raster which both have S4 implementation of rasters. Terra has functions for converting sf objects to S4 so you can use them together but I am avoiding this issue for simplicity. There are also probably other important distinctions between terra/raster and stars that I do not know about.
+# Here is a good intro to stars: https://keen-swartz-3146c4.netlify.app/sf.html#package-stars
+
+file_name <- "../1-data/Coweeta_LC/Coweeta_nlcd.tiff"
+
+# load raster using terra 
+
+# library(terra) # package to deal with rasters, similar functionality to raster but faster 
+# lc <- rast(file_name)
+# class(lc)
+# # pryr::otype(lc) # S4 type
+
+
+lc_stars <-read_stars(file_name) 
+class(lc_stars)
+# pryr::otype(lc_stars) # S3 type
+
+plot(lc_stars)
+
+# To crop, the crs need to be identical, in this case they are. But if they weren't you would need the code below to transform the raster and then resample.
+st_crs(lc_stars) == st_crs(coweeta_ws)
+
+# Transforming the crs of gridded spatial results in a curvilinear grid. We can use st_warp to resample to get a regular grid. Warping results in some loss of data
+# new_grid <- lc_stars %>% st_transform(st_crs(coweeta_ws)) %>% st_bbox() %>% st_as_stars() 
+# lc_stars_trans <- lc_stars %>% st_warp(new_grid) 
+# 
+# plot(lc_stars_trans) # notice the rotation of the raster
+
+# crop the land cover raster using Coweeta watershed polygon
+ws_lc <- lc_stars %>% st_crop(coweeta_ws)
+# ws_lc <- lc_stars[coweeta_ws]) # base R syntax
+
+plot(droplevels(ws_lc))
+
+# summarize land cover types
+legend <- read.csv("../1-data/Coweeta_LC/NLCD_legend.csv")
+table(ws_lc) %>% 
+  as.tibble() %>% 
+  mutate(Value=as.integer(ws_lc)) %>% 
+  left_join(legend, by="Value") %>% 
+  rename("Class"="Legend") %>% 
+  filter(n>0) %>% 
+  select(Class, n)
+```
+
+```{r, watershed delineation}
+# original code credit: https://matthewrvross.com/active.html includes code for how to make cool interactive 3D watersheds
+# Run time on my machine is about 14 sec. Take that Arcgis :)
+
+# NOTE: NHDPlus HR comes with flow accumulation and flow direction rasters. I would highly recommend starting with these rasters if you are working with US data but I am showing how to generate these rasters in case you aren't working with US data. 
+
+# Z sets resolution with 14 representing highest resolution
+# expand argument extends the bounding box used to extract elevation data
+coweeta_dem <- elevatr::get_elev_raster(sites, z=14, expand = 100)
+
+# check that all the sites were captured
+# especially if you are extract elevation from a large area, you will want to generate a bounding box (st_bbox(coweeta_dem)) and plot that because it will take forever for the raster to plot.
+mapview(st_bbox(coweeta_dem))+
+  mapview(sites)
+
+# view raster directly
+raster::plot(coweeta_dem) # elevatr is downloading the DEM as an S4 object. The raster package comes with built in plotting method for S4 objects
+ plot(sites, col="black", lwd=2, add=T) 
+
+# create folder to keep delineation files
+dir.create("../1-data/delin")
+
+# write dem raster to a file to access later
+writeRaster(coweeta_dem, filename="../1-data/delin/coweeta_dem.tif", overwrite=T)
+
+# write pour points to a shapefile
+st_write(sites, "../1-data/delin/sites.shp", delete_layer = T)
+
+# double check that the CRS of the dem and sites are the same
+temp <- shapefile("../1-data/delin/sites.shp")
+compareCRS(coweeta_dem, temp)
+
+# create filepath to dem
+dem_fp <- "../1-data/delin/coweeta_dem.tif"
+
+# fill single cell pits
+wbt_breach_depressions(dem_fp, "../1-data/delin/breach.tif", fill_pits=T)
+
+# flow direction raster
+wbt_d8_pointer("../1-data/delin/breach.tif", "../1-data/delin/d8_pntr.tif")
+
+# flow accumulation raster
+wbt_d8_flow_accumulation("../1-data/delin/breach.tif", "../1-data/delin/d8_flow.tif", out_type= "catchment area")
+
+# snap pour points
+# if you are working with an existing flow accumulation raster this is where you would start
+wbt_snap_pour_points("../1-data/delin/sites.shp", "../1-data/delin/d8_flow.tif", "../1-data/delin/snapped_sites.shp", 75) # this last parameter is the max snapping distance (in map units). This parameter is super important and may need to be adjusted to get a correct delineation. 
+
+# create folder to store basins
+dir.create("../1-data/delin/basins")
+
+# extract watersheds from pour points
+wbt_unnest_basins("../1-data/delin/d8_pntr.tif", "../1-data/delin/snapped_sites.shp", "../1-data/delin/basins/coweeta_sheds.tif")
+
+# get list of watersheds
+sheds <- list.files('../1-data/delin/basins',full.names=T)
+
+# function to transform raster outlines into shapefiles
+shed_stacker <- function(x){
+  stars::read_stars(sheds[x]) %>%
+    st_as_sf(merge=T,use_integer = T) %>%
+    rename(id=1) %>%
+    group_by(id) %>%
+    summarize()
+}
+
+# apply transformation
+s <- purrr::map(1:length(sheds),shed_stacker)
+
+# bind watersheds together into sf object
+shape_sheds <- do.call('rbind',s) %>% arrange(id)
+shape_sheds$site <- sites$Site
+
+# plot watersheds!
+mapview(shape_sheds, zcol="site")
+```
+
 
 ```{r, nhdplus tools to download flowlines}
 # You can use nhdplus tools to download HR data too but tools are better developed for V2
@@ -82,23 +266,4 @@ catchment <- subset$CatchmentSP
 mapview(flowline)
 ```
 
-```{r, watershed delineation}
-# transform points to USA Albers Equal Area Conic
-sites <- sites %>% st_transform(crs=5070)
-
-# NOTE: NHDPlus HR comes with flow accumulation and flow direction rasters. I would highly recommend starting with these rasters if you are working with US data but am showing how to generate these rasters if you aren't working with US data. 
-
-# Z sets resolution with 14 representing highest resolution
-# expand argument extends the bounding box used to extract elevation data
-coweeta_dem <- elevatr::get_elev_raster(sites, z=14, expand = 100)
-
-# check that all the sites were captured
-# if you are extract elevation from a large area, you will want to generate a bounding box (st_bbox(coweeta_dem)) and plot that because it will take forever for the raster to plot.
-plot(coweeta_dem)
-plot(sites, col="black", lwd=2, add=T)
-
-# save dem raster
-
-
-```
 
