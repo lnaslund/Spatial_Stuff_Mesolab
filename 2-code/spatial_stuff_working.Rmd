@@ -1,5 +1,5 @@
 ---
-title: "Spatial Stuff Key Lab Meeting"
+title: "Spatial Stuff Working Lab Meeting"
 author: "L. Naslund"
 date: "3/14/2022"
 output: html_document
@@ -55,46 +55,46 @@ library(riverdist) # package for calculating flow path distances
 ```
 
 ```{r, import GPS coordinates convert to vector data}
-# import and plot GPS points from file and call object "sites"
-sites <- read.csv("../1-data/coweeta_points.csv") 
-sites
-class(sites)
+# import and plot GPS points from csv and call object "sites"
 
-# convert data frame into sf object
+
+
+
+# convert sites into sf object
 # EPSG codes are a fast way of retrieving coordinate reference system 
 # CRS 4326 is WGS 84
-sites <- sites %>% 
-  st_as_sf(coords=c("Long", "Lat"), crs=4326) 
-sites
+
+
+
 
 # determine class of sites
 # notice addition of sf data type
-class(sites) 
+
 
 # plot sites
-mapview(sites)
+
 
 # create sf object from dataframe created within R
-sites_trib <-
-  data.frame(
-    Site = c("Confl", "WS14", "WS27", "WS34", "WS7"),
-    Lat = c(35.05975, 35.05406, 35.03798, 35.06088, 35.06414),
-    Long = c(-83.42846,-83.43160,-83.45887,-83.45475,-83.44039)
-  ) %>% st_as_sf(coords = c("Long", "Lat"), crs = 4326)
 
-mapview(sites_trib)
 
-# transform sites to USA Albers Equal Area Conic
-sites <- sites %>% st_transform(crs=5070)
+
+
+
+
+
+
+
+# transform sites to USA Albers Equal Area Conic (EPSG:5070)
+
 ```
 
 ```{r, import vector data}
 # import coweeta watershed from shapefile to object called "coweeta_ws" and transform to Albers Equal Area Conic
-coweeta_ws <- read_sf("../1-data/coweeta_ws.shp") %>% st_transform(5070) 
+
 
 # plot watershed and sites
-mapview(coweeta_ws, alpha.regions=0)+
-  mapview(sites)
+
+
 ```
 
 ```{r, spatial data manipulation}
@@ -103,25 +103,25 @@ mapview(coweeta_ws, alpha.regions=0)+
 
 # geometric confirmation
 # are all sites within the delineated watershed?
-st_contains(coweeta_ws, sites, sparse=F)
+
 
 # which sites are within 1km from the confluence
-st_is_within_distance(sites, sites[1,], 1000, sparse=F)
+
 
 # geometry operations
 # create buffer around points
-buffs <- st_buffer(sites, 1000)
+
 
 # plot buffers and sites
-mapview(buffs)+
-  mapview(sites)
+
+
 
 # create a polygon called "buffs_inter" that is the intersection of polygons for the first and second site
-buffs_inter <- st_intersection(buffs[1,], buffs[2,])
+
 
 # plot buffers and the intersection of the polygons
-mapview(buffs)+
-  mapview(buffs_inter)
+
+
 ```
 
 
@@ -181,56 +181,56 @@ table(ws_lc) %>%
 
 # Z sets resolution with 14 representing highest resolution
 # expand argument extends the bounding box used to extract elevation data
-coweeta_dem <- elevatr::get_elev_raster(sites, z=14, expand = 2000)
+
 
 # check that all the sites were captured
-# especially if you are extract elevation from a large area, you will want to generate a bounding box (st_bbox(coweeta_dem)) and plot that because it will take forever for the raster to plot.
-mapview(st_bbox(coweeta_dem))+
-  mapview(sites)
+# especially if you are extracting elevation from a large area, you will want to generate a bounding box (st_bbox(coweeta_dem)) and plot that because it will take forever for the raster to plot.
+
+
 
 # view raster directly with sites plotted on top
 # elevatr is downloading the DEM as an S4 object. The raster package comes with built in plotting method for S4 objects
-raster::plot(coweeta_dem) 
- plot(sites, col="black", lwd=2, add=T) 
+
+
 
 # create folder called "delin" to keep delineation files within the data folder
-dir.create("../1-data/delin")
+
 
 # write dem raster to a file in the delin folder to access later
-writeRaster(coweeta_dem, filename="../1-data/delin/coweeta_dem.tif", overwrite=T)
+
 
 # write pour points to a shapefile in the delin folder
-st_write(sites, "../1-data/delin/sites.shp", delete_layer = T)
 
-# double check that the CRS of the dem and sites are the same
-temporary <- shapefile("../1-data/delin/sites.shp")
-compareCRS(coweeta_dem, temporary)
+
+# double check that the CRS of the dem and sites are the same using compareCRS in the raster package
+
+
 
 # create filepath to dem
-dem_fp <- "../1-data/delin/coweeta_dem.tif"
+
 
 # fill single cell pits
-wbt_breach_depressions(dem_fp, "../1-data/delin/breach.tif", fill_pits=T)
+
 
 # flow direction raster
-wbt_d8_pointer("../1-data/delin/breach.tif", "../1-data/delin/d8_pntr.tif")
+
 
 # flow accumulation raster
-wbt_d8_flow_accumulation("../1-data/delin/breach.tif", "../1-data/delin/d8_flow.tif", out_type= "catchment area")
+
 
 # snap pour points
 # if you are working with an existing flow accumulation raster this is where you would start
 # the last parameter is the max snapping distance (in map units). This parameter is super important and may need to be adjusted to get a correct delineation. 
-wbt_snap_pour_points("../1-data/delin/sites.shp", "../1-data/delin/d8_flow.tif", "../1-data/delin/snapped_sites.shp", 75) 
+
 
 # create folder called "basins" inside delin folder to store basins
-dir.create("../1-data/delin/basins")
+
 
 # extract watersheds from pour points
-wbt_unnest_basins("../1-data/delin/d8_pntr.tif", "../1-data/delin/snapped_sites.shp", "../1-data/delin/basins/coweeta_sheds.tif")
+
 
 # get list of watersheds
-sheds <- list.files('../1-data/delin/basins',full.names=T)
+
 
 # function to transform raster outlines into shapefiles
 shed_stacker <- function(x){
@@ -260,49 +260,49 @@ mapview(shape_sheds, zcol="site")
 temp_data <- read.csv("../1-data/temp_summary.csv") %>% dplyr::select(-X) %>% rename("Site" = "ws")
   
 # join temperature data to sites object
-sites <- sites %>% left_join(temp_data, by = "Site")
+
 # calculate watershed area and temperature data
-shape_sheds <- shape_sheds %>% 
-  mutate(ws_area_km2 = st_area(.)%>% as.numeric() *1e-6) %>% 
-  st_transform(crs=4326) %>% 
-                left_join(sites %>% rename('site' = 'Site') %>%
-                            dplyr::select(site, mean_temp) %>% 
-                            st_drop_geometry())
+
+
+
+
+
+
 # create color palette function for continuous variable
-pal_fun <- colorNumeric(
-  palette = "magma", # using magma from viridis
-  domain = sites$mean_temp, 
-  reverse = TRUE)
+
+
+
+
 
 # set popups for map
-marker_popup <- paste0("<strong>Site: </strong>", sites$Site, "<br/>","<strong>Mean Temperature (C): </strong>", round(sites$mean_temp, digits=1))
 
-poly_popup <- paste0("<strong>Site: </strong>", shape_sheds$site, "<br/>","<strong>Watershed area (km2): </strong>",round(shape_sheds$ws_area_km2, digits=2))
+
+
 
 # plot map
 # leaflet expects everything in WGS 84 (EPSG: 4326). If you need to display data in a different projection, you need to specify the projection in leafletCRS function and include it as an argument to "options" in the leaflet() function
 # https://rstudio.github.io/leaflet/projections.html 
-leaflet() %>% 
-  addPolygons(data= shape_sheds %>% st_transform(crs=4326), 
-              fillColor = ~pal_fun(mean_temp), 
-              color = "black", 
-              opacity = 0.5,
-              weight = 1, 
-              popup = poly_popup, 
-              group = "watersheds") %>% 
-  addCircleMarkers(data= sites %>% st_transform(crs=4326), 
-                   fillColor = ~pal_fun(mean_temp), 
-                   color = "#808080",
-                   opacity = 1, 
-                   weight = 1, 
-                   fillOpacity = 1, 
-                   popup = marker_popup,
-                   group = "outlets") %>% 
-  addProviderTiles("CartoDB.Positron", group = 'Streets') %>% 
-  addProviderTiles('Esri.WorldImagery',group='Imagery') %>%
-  addLayersControl(baseGroups=c('Streets','Imagery'), 
-                   overlayGroups = c("watersheds", "outlets"), 
-                   options = layersControlOptions(collapsed = F, autoZIndex =T)) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   
 ```
 
@@ -311,27 +311,27 @@ leaflet() %>%
 
 # Extract the ComID of the outlet flowline segment
 # ComID is an identifier of an NHD flowlines
-start_comid <- discover_nhdplus_id(sites %>% filter(Site == "Confl"))
+
 
 # Extract upstream flowline segments
-flowline <- navigate_nldi(list(featureSource = "comid",
-                               featureID = start_comid),
-                          mode = "upstreamTributaries",
-                          distance_km = 1000)
+
+
+
+
 
 # Download flowline, catchment, and waterbody layers 
-subset_file <- tempfile(fileext = ".gpkg")
-subset <- subset_nhdplus(comids = as.integer(flowline$UT$nhdplus_comid),
-                         output_file = subset_file,
-                         nhdplus_data = "download",
-                         flowline_only = FALSE,
-                         return_data = TRUE, overwrite = TRUE)
+
+
+
+
+
+
 
 # No waterbodies in this upstream trace
-flowline <- subset$NHDFlowline_Network # notice the attributes that are downloaded (e.g., stream order, QAMA) 
-catchment <- subset$CatchmentSP
+# notice the attributes that are downloaded (e.g., stream order, QAMA) 
 
-# plot flowline
+
+#plot flowline
 
 ```
 
@@ -339,46 +339,46 @@ catchment <- subset$CatchmentSP
 # This code just scratches the surface of what you can do with riverdist and also uses a very simple example. See vignette and documentation for more information https://cran.r-project.org/web/packages/riverdist/vignettes/riverdist_vignette.html 
 
 # write NHD flowline as shp file for river dist
-st_write(flowline %>% st_combine(), "../1-data/flowline.shp")
+
 
 # read in flowline shp
-flowline_shp <- st_read("../1-data/flowline.shp")
+
 
 # plot flowline and sites. Notice that the NHDPlus V2 did not capture some of the sampled tributaries
-mapview(flowline_shp)+
-  mapview(sites)
+
+
 
 # convert shapefile to rivernetwork
-MyRivernetwork <- line2network(path="../1-data/flowline.shp", layer="flowline", reproject="+init=EPSG:5070")
+
 
 # clean up topology
-abstreams_fixed <- cleanup(MyRivernetwork) # seg 2, vert 296
-topologydots(abstreams_fixed)
+
+
 
 # save network
 save(abstreams_fixed, file = "../1-data/fixed.rda")
 
 # load network
-load(file="../1-data/fixed.rda")
-class(abstreams_fixed)
+
+
 
 # find projected site coordinates and convert to data frame called "site_coord"
-site_coord <- st_coordinates(sites) %>% 
-  as.data.frame()
+
+
 
 # snap sites to vertices
-riv <- xy2segvert(x=site_coord$X, y=site_coord$Y, rivers=abstreams_fixed)
+
 
 # plot 
-zoomtoseg(seg=c(2, 7), rivers=abstreams_fixed)
-riverpoints(seg=riv$seg, vert=riv$vert, rivers=abstreams_fixed, pch=15, col="blue")
-points(site_coord$X, site_coord$Y, pch=16, col="red")
+
+
+
 
 # create distance matrix
-dmat <- riverdistancemat(riv$seg, riv$vert, abstreams_fixed)
+
 
 # plot flowpath between sites
-zoomtoseg(seg=c(2, 7), rivers=abstreams_fixed)
-riverdistance(startseg=2, startvert=4, endseg=5, endvert=198, rivers=abstreams_fixed, map=TRUE, add=T)
+
+
 ```
 
